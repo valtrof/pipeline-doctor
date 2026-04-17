@@ -20,6 +20,7 @@ Built with Python, LangChain, and the OpenAI API. Uses only BigQuery public data
 docker build -t pipeline-doctor .
 docker run -p 8000:8000 \
   -e OPENAI_API_KEY=your_key_here \
+  -e GCP_PROJECT_ID=your_gcp_project_id \
   -v ~/.config/gcloud:/root/.config/gcloud:ro \
   pipeline-doctor
 ```
