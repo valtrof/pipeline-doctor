@@ -1,0 +1,10 @@
+google-cloud-bigquery
+db-dtypes
+langchain
+langchain-openai
+python-dotenv
+pandas
+fastapi
+uvicorn
+pydantic
+pytest

@@ -1,0 +1,10 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+main.ipynb
+.ipynb_checkpoints/
+*.json
