@@ -95,17 +95,17 @@ Dockerfile          # Container build
 
 ```
 ┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
-│   BigQuery      │────▶│  anomaly_detector.py  │────▶│   FastAPI       │
-│ Public Datasets │     │                       │     │   api.py        │
-└─────────────────┘     │  detect_anomalies()   │     └─────────────────┘
-                        │  diagnose()           │
-                        │  suggest_fixes()      │
-                        └──────────┬────────────┘
+│   BigQuery      │────>│  anomaly_detector.py │────>│   FastAPI       │
+│ Public Datasets │     │                      │     │   api.py        │
+└─────────────────┘     │  detect_anomalies()  │     └─────────────────┘
+                        │  diagnose()          │
+                        │  suggest_fixes()     │
+                        └──────────┬───────────┘
                                    │
-                        ┌──────────▼────────────┐
-                        │   OpenAI API          │
-                        │   (via LangChain)     │
-                        └───────────────────────┘
+                        ┌──────────▼───────────┐
+                        │   OpenAI API         │
+                        │   (via LangChain)    │
+                        └──────────────────────┘
 ```
 
 ### Design decisions
