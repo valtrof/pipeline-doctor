@@ -1,4 +1,4 @@
-# Pipeine Doctor
+# Pipeline Doctor
 
 [![pipeline status](https://gitlab.com/valtrof/pipeline-doctor/badges/main/pipeline.svg)](https://gitlab.com/valtrof/pipeline-doctor/-/pipelines)
 
