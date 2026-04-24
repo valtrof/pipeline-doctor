@@ -1,7 +1,5 @@
 # Pipeline Doctor
 
-[![pipeline status](https://gitlab.com/valtrof/pipeline-doctor/badges/main/pipeline.svg)](https://gitlab.com/valtrof/pipeline-doctor/-/pipelines)
-
 An LLM-powered system that scans BigQuery public datasets for data anomalies, generates natural-language diagnosis of each problem, and recommends pipeline fixes.
 
 Built with Python, LangChain, and the OpenAI API. Uses only BigQuery public datasets — no proprietary data.
