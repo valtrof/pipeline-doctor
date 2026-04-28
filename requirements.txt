@@ -1,7 +1,6 @@
 google-cloud-bigquery
 db-dtypes
-langchain
-langchain-openai
+anthropic
 python-dotenv
 pandas
 fastapi

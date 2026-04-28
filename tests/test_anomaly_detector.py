@@ -2,7 +2,8 @@ import pytest
 import pandas as pd
 from unittest.mock import MagicMock, patch
 
-from anomaly_detector import detect_anomalies, detect_outliers, diagnose, get_llm, suggest_fixes
+import anthropic
+from anomaly_detector import detect_anomalies, detect_outliers, diagnose, get_client, suggest_fixes
 
 
 # ---------------------------------------------------------------------------
@@ -47,48 +48,41 @@ def test_detect_anomalies_ignores_zeros_in_non_numeric_columns():
 
 
 # ---------------------------------------------------------------------------
-# get_llm
+# get_client
 # ---------------------------------------------------------------------------
 
-def test_get_llm_raises_when_api_key_missing():
+def test_get_client_raises_when_api_key_missing():
     with patch.dict("os.environ", {}, clear=True):
-        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
-            get_llm()
+        with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+            get_client()
 
 
-def test_get_llm_returns_instance_when_key_present():
-    from langchain_openai import ChatOpenAI
-    with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
-        llm = get_llm()
-    assert isinstance(llm, ChatOpenAI)
+def test_get_client_returns_instance_when_key_present():
+    with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+        client = get_client()
+    assert isinstance(client, anthropic.Anthropic)
+
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+def _make_client_mock(response_text: str) -> MagicMock:
+    mock_client = MagicMock()
+    mock_message = MagicMock()
+    mock_message.content = [MagicMock(text=response_text)]
+    mock_client.messages.create.return_value = mock_message
+    return mock_client
 
 
 # ---------------------------------------------------------------------------
 # diagnose
 # ---------------------------------------------------------------------------
 
-def _make_chain_mock(response_text: str) -> tuple[MagicMock, MagicMock]:
-    """Return (mock_prompt, mock_chain) where chain.invoke returns response_text.
-
-    LangChain's | operator calls prompt.__or__(llm), so we mock at the prompt level.
-    """
-    mock_chain = MagicMock()
-    mock_chain.invoke.return_value = MagicMock(content=response_text)
-
-    mock_prompt = MagicMock()
-    mock_prompt.__or__ = MagicMock(return_value=mock_chain)
-
-    return mock_prompt, mock_chain
-
-
 def test_diagnose_returns_anomalies_and_diagnosis():
     df = pd.DataFrame({"a": [None, 1, 2]})
-    mock_prompt, _ = _make_chain_mock("Fix the nulls.")
-
-    with patch("anomaly_detector.ChatPromptTemplate") as mock_ct:
-        mock_ct.from_template.return_value = mock_prompt
-        anomalies, diagnosis = diagnose(df, "Test Dataset", MagicMock())
-
+    mock_client = _make_client_mock("Fix the nulls.")
+    anomalies, diagnosis = diagnose(df, "Test Dataset", mock_client)
     assert "nulls" in anomalies
     assert diagnosis == "Fix the nulls."
 
@@ -102,28 +96,20 @@ def test_diagnose_skips_llm_when_no_anomalies():
 
 def test_diagnose_passes_dataset_name_to_llm():
     df = pd.DataFrame({"a": [None, 1]})
-    mock_prompt, mock_chain = _make_chain_mock("ok")
-
-    with patch("anomaly_detector.ChatPromptTemplate") as mock_ct:
-        mock_ct.from_template.return_value = mock_prompt
-        diagnose(df, "My Dataset", MagicMock())
-
-    call_kwargs = mock_chain.invoke.call_args[0][0]
-    assert call_kwargs["dataset_name"] == "My Dataset"
+    mock_client = _make_client_mock("ok")
+    diagnose(df, "My Dataset", mock_client)
+    call_kwargs = mock_client.messages.create.call_args
+    # dataset name appears in the formatted prompt passed as messages content
+    prompt_text = call_kwargs[1]["messages"][0]["content"]
+    assert "My Dataset" in prompt_text
 
 
 def test_diagnose_raises_on_llm_failure():
     df = pd.DataFrame({"a": [None, 1]})
-    mock_chain = MagicMock()
-    mock_chain.invoke.side_effect = RuntimeError("API timeout")
-
-    mock_prompt = MagicMock()
-    mock_prompt.__or__ = MagicMock(return_value=mock_chain)
-
-    with patch("anomaly_detector.ChatPromptTemplate") as mock_ct:
-        mock_ct.from_template.return_value = mock_prompt
-        with pytest.raises(RuntimeError, match="API timeout"):
-            diagnose(df, "Test Dataset", MagicMock())
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = RuntimeError("API timeout")
+    with pytest.raises(RuntimeError, match="API timeout"):
+        diagnose(df, "Test Dataset", mock_client)
 
 
 # ---------------------------------------------------------------------------
@@ -155,12 +141,8 @@ def test_detect_anomalies_ignores_outliers_in_non_numeric():
 
 def test_suggest_fixes_returns_fix_string():
     anomalies = "- passenger_count: 10 nulls (10.0%)"
-    mock_prompt, _ = _make_chain_mock("1. df['passenger_count'].fillna(df['passenger_count'].median(), inplace=True)")
-
-    with patch("anomaly_detector.ChatPromptTemplate") as mock_ct:
-        mock_ct.from_template.return_value = mock_prompt
-        result = suggest_fixes(anomalies, MagicMock())
-
+    mock_client = _make_client_mock("1. df['passenger_count'].fillna(df['passenger_count'].median(), inplace=True)")
+    result = suggest_fixes(anomalies, mock_client)
     assert "passenger_count" in result
 
 
@@ -170,13 +152,7 @@ def test_suggest_fixes_returns_no_fixes_when_empty():
 
 
 def test_suggest_fixes_raises_on_llm_failure():
-    mock_chain = MagicMock()
-    mock_chain.invoke.side_effect = RuntimeError("API timeout")
-
-    mock_prompt = MagicMock()
-    mock_prompt.__or__ = MagicMock(return_value=mock_chain)
-
-    with patch("anomaly_detector.ChatPromptTemplate") as mock_ct:
-        mock_ct.from_template.return_value = mock_prompt
-        with pytest.raises(RuntimeError, match="API timeout"):
-            suggest_fixes("- col: 1 nulls (10.0%)", MagicMock())
+    mock_client = MagicMock()
+    mock_client.messages.create.side_effect = RuntimeError("API timeout")
+    with pytest.raises(RuntimeError, match="API timeout"):
+        suggest_fixes("- col: 1 nulls (10.0%)", mock_client)

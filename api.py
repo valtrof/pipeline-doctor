@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from google.cloud import bigquery
 
-from anomaly_detector import diagnose, get_llm, suggest_fixes
+from anomaly_detector import diagnose, get_client, suggest_fixes
 
 load_dotenv()
 
@@ -24,9 +24,9 @@ BQ_TABLE_RE = re.compile(r'^[\w\-]+\.[\w\-]+\.[\w\-]+$')
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize shared clients once at startup, release at shutdown."""
-    logger.info("Starting up — initialising BigQuery client and LLM.")
+    logger.info("Starting up — initialising BigQuery and Anthropic clients.")
     app.state.bq_client = bigquery.Client(project=PROJECT_ID)
-    app.state.llm = get_llm()
+    app.state.client = get_client()
     logger.info("Startup complete.")
     yield
     logger.info("Shutting down.")
@@ -68,7 +68,7 @@ def analyze(request: AnalyzeRequest, app_request: Request) -> AnalyzeResponse:
         )
 
     bq_client = app_request.app.state.bq_client
-    llm = app_request.app.state.llm
+    client = app_request.app.state.client
 
     logger.info("Analyzing dataset: %s (limit=%d)", request.dataset, request.limit)
 
@@ -83,8 +83,8 @@ def analyze(request: AnalyzeRequest, app_request: Request) -> AnalyzeResponse:
         raise HTTPException(status_code=404, detail="Dataset returned 0 rows. Check the table name.")
 
     try:
-        anomalies, diagnosis = diagnose(df, request.dataset, llm)
-        fixes = suggest_fixes(anomalies, llm)
+        anomalies, diagnosis = diagnose(df, request.dataset, client)
+        fixes = suggest_fixes(anomalies, client)
     except Exception as e:
         logger.error("Analysis failed for %s: %s", request.dataset, e)
         raise HTTPException(status_code=500, detail=f"Analysis error: {e}")

@@ -1,28 +1,26 @@
 import logging
 import os
 
+import anthropic
 import pandas as pd
 from dotenv import load_dotenv
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gpt-4o-mini"
+MODEL = "claude-haiku-4-5-20251001"
 
-DIAGNOSIS_PROMPT = """
+DIAGNOSIS_PROMPT = """\
 You are a senior data engineer reviewing a data quality report.
 Dataset: {dataset_name}
 Anomalies detected:
 {anomalies}
 For each anomaly: explain the likely cause and recommend how the pipeline should handle it.
-Be concise and technical.
-"""
+Be concise and technical."""
 
-FIX_PROMPT = """
+FIX_PROMPT = """\
 You are a senior data engineer. Given the following anomalies in a pandas DataFrame, \
 return concrete Python/pandas fix code for each one.
 
@@ -34,16 +32,26 @@ Rules:
 - Each fix must be a single executable pandas line using `df` as the variable name.
 - Example format:
   1. passenger_count nulls → df['passenger_count'].fillna(df['passenger_count'].median(), inplace=True)
-  2. trip_miles zeros → df = df[df['trip_miles'] > 0]
+  2. trip_miles zeros → df = df[df['trip_miles'] > 0]\
 """
 
 
-def get_llm() -> ChatOpenAI:
-    """Return a configured ChatOpenAI instance using the OPENAI_API_KEY environment variable."""
-    api_key = os.getenv("OPENAI_API_KEY")
+def get_client() -> anthropic.Anthropic:
+    """Return a configured Anthropic client using the ANTHROPIC_API_KEY environment variable."""
+    api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
-        raise ValueError("OPENAI_API_KEY is not set. Add it to your .env file.")
-    return ChatOpenAI(model=MODEL_NAME, api_key=api_key)
+        raise ValueError("ANTHROPIC_API_KEY is not set. Add it to your .env file.")
+    return anthropic.Anthropic(api_key=api_key)
+
+
+def _call_claude(client: anthropic.Anthropic, prompt: str) -> str:
+    """Send a single-turn message to Claude and return the text response."""
+    response = client.messages.create(
+        model=MODEL,
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.content[0].text
 
 
 def detect_outliers(df: pd.DataFrame) -> str:
@@ -59,7 +67,6 @@ def detect_outliers(df: pd.DataFrame) -> str:
         Q3 = df[col].quantile(0.75)
         IQR = Q3 - Q1
 
-        # Skip if IQR is zero (all values are the same)
         if IQR == 0:
             continue
 
@@ -103,40 +110,25 @@ def detect_anomalies(df: pd.DataFrame) -> str:
     return "\n".join(report)
 
 
-def suggest_fixes(anomalies: str, llm: ChatOpenAI) -> str:
-    """Return concrete pandas fix code for each anomaly in the report.
-
-    Args:
-        anomalies: The anomaly report string produced by detect_anomalies().
-        llm: A configured ChatOpenAI instance.
-
-    Returns:
-        A numbered list of executable pandas fix statements.
-    """
+def suggest_fixes(anomalies: str, client: anthropic.Anthropic) -> str:
+    """Return concrete pandas fix code for each anomaly in the report."""
     if not anomalies:
         return "No fixes needed."
 
     try:
-        prompt = ChatPromptTemplate.from_template(FIX_PROMPT)
-        chain = prompt | llm
-        response = chain.invoke({"anomalies": anomalies})
+        result = _call_claude(client, FIX_PROMPT.format(anomalies=anomalies))
         logger.info("Fix suggestions generated.")
-        return response.content
+        return result
     except Exception as e:
         logger.error("Fix suggestion failed: %s", e)
         raise
 
 
-def diagnose(df: pd.DataFrame, dataset_name: str, llm: ChatOpenAI) -> tuple[str, str]:
-    """Detect anomalies in df and return an LLM-generated diagnosis.
-
-    Args:
-        df: The dataset to analyse.
-        dataset_name: Human-readable name used in the LLM prompt and logs.
-        llm: A configured ChatOpenAI instance.
+def diagnose(df: pd.DataFrame, dataset_name: str, client: anthropic.Anthropic) -> tuple[str, str]:
+    """Detect anomalies in df and return a Claude-generated diagnosis.
 
     Returns:
-        A tuple of (anomaly_report, llm_diagnosis).
+        A tuple of (anomaly_report, diagnosis).
     """
     logger.info("Starting diagnosis for dataset: %s", dataset_name)
     anomalies = detect_anomalies(df)
@@ -146,11 +138,10 @@ def diagnose(df: pd.DataFrame, dataset_name: str, llm: ChatOpenAI) -> tuple[str,
         return anomalies, "No anomalies detected."
 
     try:
-        prompt = ChatPromptTemplate.from_template(DIAGNOSIS_PROMPT)
-        chain = prompt | llm
-        response = chain.invoke({"anomalies": anomalies, "dataset_name": dataset_name})
+        prompt = DIAGNOSIS_PROMPT.format(anomalies=anomalies, dataset_name=dataset_name)
+        result = _call_claude(client, prompt)
         logger.info("Diagnosis complete for dataset: %s", dataset_name)
-        return anomalies, response.content
+        return anomalies, result
     except Exception as e:
         logger.error("LLM diagnosis failed for %s: %s", dataset_name, e)
         raise
