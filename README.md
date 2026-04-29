@@ -1,8 +1,10 @@
 # Pipeline Doctor
 
+![CI](https://github.com/valtrof/pipeline-doctor/actions/workflows/ci.yml/badge.svg)
+
 An LLM-powered system that scans BigQuery public datasets for data anomalies, generates natural-language diagnosis of each problem, and recommends pipeline fixes.
 
-Built with Python, LangChain, and the OpenAI API. Uses only BigQuery public datasets — no proprietary data.
+Built with Python and the Anthropic Claude API (`claude-haiku-4-5-20251001`). Uses only BigQuery public datasets — no proprietary data.
 
 ## What it does
 
@@ -17,7 +19,7 @@ Built with Python, LangChain, and the OpenAI API. Uses only BigQuery public data
 ```bash
 docker build -t pipeline-doctor .
 docker run -p 8000:8000 \
-  -e OPENAI_API_KEY=your_key_here \
+  -e ANTHROPIC_API_KEY=your_key_here \
   -e GCP_PROJECT_ID=your_gcp_project_id \
   -v ~/.config/gcloud:/root/.config/gcloud:ro \
   pipeline-doctor
@@ -33,12 +35,12 @@ Then open `http://localhost:8000/docs` for the interactive API.
 pip install -r requirements.txt
 ```
 
-### 2. Set up OpenAI API key
+### 2. Set up Anthropic API key
 
 Create a `.env` file in this directory:
 
 ```
-OPENAI_API_KEY=your_key_here
+ANTHROPIC_API_KEY=your_key_here
 ```
 
 ### 3. Set up GCP credentials
@@ -101,8 +103,8 @@ Dockerfile          # Container build
                         └──────────┬───────────┘
                                    │
                         ┌──────────▼───────────┐
-                        │   OpenAI API         │
-                        │   (via LangChain)    │
+                        │ Anthropic Claude API  │
+                        │ (claude-haiku-4-5)   │
                         └──────────────────────┘
 ```
 
@@ -110,11 +112,11 @@ Dockerfile          # Container build
 
 **Separation of concerns — three distinct pipeline stages**
 
-Detection, diagnosis, and fix suggestion are three separate functions rather than one combined function. This makes each stage independently testable and replaceable. Swapping OpenAI for a local Ollama model, for example, requires changing only the LLM instantiation — not the detection logic.
+Detection, diagnosis, and fix suggestion are three separate functions rather than one combined function. This makes each stage independently testable and replaceable. Swapping `claude-haiku` for `claude-opus`, for example, requires changing only the `MODEL` constant — not the detection or fix logic.
 
 **Dependency injection over global state**
 
-The LLM client is created once at startup and passed into functions as a parameter (`diagnose(df, name, llm)`), rather than instantiated inside each function. This makes unit tests straightforward — tests pass a mock LLM without patching global state or making real API calls.
+The Anthropic client is created once at startup and passed into functions as a parameter (`diagnose(df, name, client)`), rather than instantiated inside each function. This makes unit tests straightforward — tests pass a mock client without patching global state or making real API calls.
 
 **FastAPI lifespan for shared resources**
 
