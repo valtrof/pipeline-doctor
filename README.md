@@ -1,6 +1,6 @@
 # Pipeline Doctor
 
-![CI](https://github.com/valtrof/pipeline-doctor/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/valtrof/pipeline-doctor/actions/workflows/ci.yml/badge.svg?branch=main)
 
 An LLM-powered system that scans BigQuery public datasets for data anomalies, generates natural-language diagnosis of each problem, and recommends pipeline fixes.
 
