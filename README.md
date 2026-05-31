@@ -1,18 +1,59 @@
 # Pipeline Doctor
 
 ![CI](https://github.com/valtrof/pipeline-doctor/actions/workflows/ci.yml/badge.svg?branch=main)
+![Python](https://img.shields.io/badge/python-3.12-blue)
 
-An LLM-powered system that scans BigQuery public datasets for data anomalies, generates natural-language diagnosis of each problem, and recommends pipeline fixes.
+LLM-powered data quality system for BigQuery: statistical analysis detects anomalies; Claude generates natural-language diagnosis and executable pandas fix code. The LLM is used for reasoning — never for detection.
 
-Built with Python and the Anthropic Claude API (`claude-haiku-4-5-20251001`). Uses only BigQuery public datasets — no proprietary data.
+Built with Python and the Anthropic Claude API (`claude-haiku-4-5`). Uses only BigQuery public datasets — no proprietary data, no GCP billing required.
 
 ## What it does
 
 1. Connects to BigQuery public datasets
-2. Scans for data anomalies (nulls, zero values, outliers)
-3. Generates a natural-language diagnosis of each anomaly via LLM
-4. Recommends concrete pandas fix code for each issue
+2. Scans for data anomalies (nulls, zero values, outliers) using statistical analysis
+3. Sends confirmed anomalies to Claude for natural-language diagnosis
+4. Returns executable pandas fix code for each issue
 5. Exposes all of the above via a REST API
+
+## Architecture
+
+```
+POST /analyze
+      │
+      ▼
+┌─────────────────────────────────────┐
+│  anomaly_detector.py                │
+│                                     │
+│  detect_anomalies()                 │
+│  → pandas only, deterministic       │
+│  → no LLM involved                  │
+└──────────────┬──────────────────────┘
+               │ confirmed anomalies
+               ▼
+┌─────────────────────────────────────┐
+│  diagnose() + suggest_fixes()       │
+│  → Anthropic Claude API             │
+│  → explains causes                  │
+│  → generates pandas fix code        │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+         FastAPI response
+```
+
+## Key technical decisions
+
+**LLM as diagnosis layer, not detection layer**
+The LLM is never asked "are there anomalies?" — only "given these confirmed anomalies, explain causes and suggest fixes." This prevents hallucination on the detection step and keeps LLM output focused on reasoning rather than data scanning.
+
+**Statistical detection without dependencies**
+Anomaly detection uses pandas only — no Great Expectations or external libraries. This keeps the detection stage fast, deterministic, and independently testable. The LLM is only invoked after anomalies have been confirmed statistically.
+
+**Dependency injection over global state**
+The Anthropic client is created once at startup and passed into functions as a parameter (`diagnose(df, name, client)`), rather than instantiated inside each function. Unit tests pass a mock client without patching global state or making real API calls.
+
+**FastAPI lifespan for shared resources**
+The BigQuery client and LLM client are initialised once in the FastAPI lifespan context and stored on `app.state`. Avoids creating a new connection on every request; surfaces startup failures immediately.
 
 ## Quick start (Docker)
 
@@ -29,38 +70,26 @@ Then open `http://localhost:8000/docs` for the interactive API.
 
 ## Quick start (local)
 
-### 1. Install dependencies
-
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Set up Anthropic API key
-
-Create a `.env` file in this directory:
-
+Create `.env`:
 ```
 ANTHROPIC_API_KEY=your_key_here
 ```
 
-### 3. Set up GCP credentials
-
+Authenticate with GCP:
 ```bash
 gcloud auth application-default login
 ```
 
-If you don't have the GCP CLI installed: https://cloud.google.com/sdk/docs/install
-
-No GCP billing required — this project uses only BigQuery public datasets.
-
-### 4. Run the API
-
+Run:
 ```bash
 uvicorn api:app --reload
 ```
 
-### 5. Call the API
-
+Call the API:
 ```bash
 curl -X POST http://localhost:8000/analyze \
   -H "Content-Type: application/json" \
@@ -69,106 +98,55 @@ curl -X POST http://localhost:8000/analyze \
 
 Or open `http://localhost:8000/docs` for the interactive UI.
 
-### 6. Run the notebook
-
-Open `main.ipynb` in VS Code or JupyterLab and run all cells.
-
-### 7. Run tests
+## Run tests
 
 ```bash
 pytest tests/ -v
 ```
 
+18 tests. No live API or BigQuery calls — mock client injected throughout.
+
 ## Project structure
 
 ```
 api.py              # FastAPI service — HTTP layer, calls anomaly_detector
-anomaly_detector.py # Core logic — anomaly detection, LLM diagnosis, fix suggestions
+anomaly_detector.py # Core logic — detection, LLM diagnosis, fix suggestions
 main.ipynb          # Notebook — interactive exploration of datasets
 tests/              # Unit tests (pytest, no network calls)
-requirements.txt    # Python dependencies
-Dockerfile          # Container build
-.env                # Your API keys (not committed to version control)
+requirements.txt
+Dockerfile
 ```
-
-## Architecture
-
-```
-┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
-│   BigQuery      │────>│  anomaly_detector.py │────>│   FastAPI       │
-│ Public Datasets │     │                      │     │   api.py        │
-└─────────────────┘     │  detect_anomalies()  │     └─────────────────┘
-                        │  diagnose()          │
-                        │  suggest_fixes()     │
-                        └──────────┬───────────┘
-                                   │
-                        ┌──────────▼───────────┐
-                        │ Anthropic Claude API  │
-                        │ (claude-haiku-4-5)   │
-                        └──────────────────────┘
-```
-
-### Design decisions
-
-**Separation of concerns — three distinct pipeline stages**
-
-Detection, diagnosis, and fix suggestion are three separate functions rather than one combined function. This makes each stage independently testable and replaceable. Swapping `claude-haiku` for `claude-opus`, for example, requires changing only the `MODEL` constant — not the detection or fix logic.
-
-**Dependency injection over global state**
-
-The Anthropic client is created once at startup and passed into functions as a parameter (`diagnose(df, name, client)`), rather than instantiated inside each function. This makes unit tests straightforward — tests pass a mock client without patching global state or making real API calls.
-
-**FastAPI lifespan for shared resources**
-
-The BigQuery client and LLM are initialised once in the FastAPI lifespan context (`@asynccontextmanager`) and stored on `app.state`. This avoids the cost of creating a new connection on every request, and makes startup failures visible immediately rather than on the first request.
-
-**Statistical detection without dependencies**
-
-Anomaly detection uses pandas only — no external libraries like Great Expectations. This keeps the detection stage fast, deterministic, and independently testable. The LLM is only invoked after anomalies have been confirmed statistically.
-
-**LLM as diagnosis layer, not detection layer**
-
-The LLM is never asked "are there anomalies?" — it is only asked "given these confirmed anomalies, explain causes and suggest fixes." This prevents hallucination on the detection step and keeps the LLM output focused on reasoning rather than data scanning.
 
 ## Sample output
 
-### NYC Taxi Trips 2022 — Null and Zero Anomalies
+**Dataset:** `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022`
 
 **Anomalies detected:**
 ```
-- passenger_count: 156 nulls (15.6%)
-- rate_code: 156 nulls (15.6%)
-- store_and_fwd_flag: 156 nulls (15.6%)
-- airport_fee: 156 nulls (15.6%)
-- passenger_count: 21 zero values
+passenger_count:   156 nulls (15.6%)
+rate_code:         156 nulls (15.6%)
+store_and_fwd_flag: 156 nulls (15.6%)
+airport_fee:       156 nulls (15.6%)
+passenger_count:    21 zero values
 ```
 
 **LLM diagnosis (trimmed):**
+> **Anomaly 1: Null values in `passenger_count`, `rate_code`, `store_and_fwd_flag`, `airport_fee`**
+> Likely caused by incomplete records at trip completion or data ingestion failures from the source system.
+> Recommendation: impute `passenger_count` with column median; fill `store_and_fwd_flag` nulls with `'N'`.
+>
+> **Anomaly 2: Zero values in `passenger_count`**
+> Likely incorrect data entry or system error — a completed trip should have at least one passenger.
+> Recommendation: filter out zero-passenger records before analysis; add upstream validation.
 
-> ### Anomaly 1: Null Values in `passenger_count`, `rate_code`, `store_and_fwd_flag`, and `airport_fee`
-> **Likely Cause**: These null values can arise from data entry errors, incomplete records at the time of trip completion, or issues during data ingestion from the source system.
->
-> **Pipeline Recommendation**:
-> 1. **Data Imputation**: Consider replacing null values with a default value. For `passenger_count`, replacing nulls with the median or mode of the column is appropriate.
-> 2. **Data Validation**: Implement strict validation at the data entry stage to prevent future null entries.
->
-> ### Anomaly 2: Zero Values in `passenger_count`
-> **Likely Cause**: Zero values likely indicate incorrect data entry or system errors, as a trip should have at least one passenger.
->
-> **Pipeline Recommendation**:
-> 1. **Filtering**: Set up a validation rule to exclude records with passenger_count = 0 from analysis.
-> 2. **Alerts**: Implement alerting mechanisms whenever zero values are encountered.
-
-**Suggested fixes (LLM-generated pandas code):**
+**Suggested pandas fixes:**
+```python
+df['passenger_count'].fillna(df['passenger_count'].median(), inplace=True)
+df['rate_code'].fillna(df['rate_code'].mode()[0], inplace=True)
+df['store_and_fwd_flag'].fillna('N', inplace=True)
+df['airport_fee'].fillna(0, inplace=True)
+df['passenger_count'].replace(0, df['passenger_count'].median(), inplace=True)
 ```
-1. passenger_count nulls → df['passenger_count'].fillna(df['passenger_count'].median(), inplace=True)
-2. rate_code nulls → df['rate_code'].fillna(df['rate_code'].mode()[0], inplace=True)
-3. store_and_fwd_flag nulls → df['store_and_fwd_flag'].fillna('N', inplace=True)
-4. airport_fee nulls → df['airport_fee'].fillna(0, inplace=True)
-5. passenger_count zeros → df['passenger_count'].replace(0, df['passenger_count'].median(), inplace=True)
-```
-
----
 
 ## Datasets used
 
