@@ -25,6 +25,18 @@ Data quality failures are usually silent: the pipeline keeps running while nulls
 4. Recommends concrete pandas fix code for each issue
 5. Exposes all of the above via a REST API
 
+## v2 in progress: agentic remediation
+
+v1 stops at *suggesting* fixes as text. v2 ([design doc](DESIGN.md)) closes the loop: a bounded agent applies each proposed fix on a sandboxed copy of the data, **verifies it by re-running the same statistical detection**, retries on failure, and ends in a remediation report for human review. The v1 principle extends to the fix side: the LLM never decides whether a fix worked — re-running detection does. The verifier also catches the degenerate solution (deleting rows always "resolves" an anomaly) via a row-retention budget and a regression check on previously clean columns.
+
+Status:
+
+- [x] Design doc — [DESIGN.md](DESIGN.md)
+- [x] `sandbox.py` — restricted execution of fix code (AST safety checks, minimal namespace, atomic apply) + deterministic verification verdicts; fully unit-tested including adversarial fixes
+- [x] `agent.py` — bounded tool-use loop (budgets, verify-before-finalize gate, and attempt caps enforced in code, not by the model). Live smoke run: 3/3 seeded anomalies fixed in 10 turns with 100% row retention — including one fix that failed verification and was corrected on retry ([demo_run.json](demo_run.json))
+- [ ] `POST /remediate` endpoint
+- [ ] Seeded-anomaly eval with results table here
+
 ## Quick start (Docker)
 
 ```bash
@@ -94,7 +106,12 @@ pytest tests/ -v
 
 ```
 api.py              # FastAPI service — HTTP layer, calls anomaly_detector
-anomaly_detector.py # Core logic — anomaly detection, LLM diagnosis, fix suggestions
+anomaly_detector.py # Core logic — anomaly detection (structured + report), LLM diagnosis, fix suggestions
+sandbox.py          # v2 — sandboxed fix execution + deterministic verification (see DESIGN.md)
+agent.py            # v2 — bounded agentic remediation loop (Claude tool use)
+agent_demo.py       # v2 — smoke-run script (synthetic seeded data by default, or BigQuery)
+demo_run.json       # v2 — live smoke-run report + full agent transcript
+DESIGN.md           # v2 design doc — agentic remediation loop
 main.ipynb          # Notebook — interactive exploration of datasets
 tests/              # Unit tests (pytest, no network calls)
 requirements.txt    # Python dependencies

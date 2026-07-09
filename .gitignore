@@ -15,6 +15,3 @@ venv/
 
 # Jupyter
 .ipynb_checkpoints/
-
-# GCP credentials
-*.json

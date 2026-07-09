@@ -54,15 +54,30 @@ def _call_claude(client: anthropic.Anthropic, prompt: str) -> str:
     return response.content[0].text
 
 
-def detect_outliers(df: pd.DataFrame) -> str:
-    """Scan numeric columns for outliers using the IQR method.
+def profile_anomalies(df: pd.DataFrame) -> list[dict]:
+    """Scan a DataFrame for nulls, zero values, and IQR outliers; return structured records.
 
-    For each numeric column, flag values outside [Q1 - 1.5*IQR, Q3 + 1.5*IQR].
-    Returns a formatted report string.
+    Each record has the shape {"column", "kind": "null" | "zero" | "outlier", "count", "pct"}.
+    This is the machine-readable source of truth that both the formatted reports and the
+    agent sandbox verification (sandbox.py) are built on.
     """
-    report = []
+    records = []
 
-    for col in df.select_dtypes(include="number").columns:
+    nulls = df.isnull().sum()
+    for col, count in nulls[nulls > 0].items():
+        # float() so records stay JSON-serializable (numpy float64 otherwise)
+        pct = float(round(count / len(df) * 100, 1))
+        records.append({"column": col, "kind": "null", "count": int(count), "pct": pct})
+
+    numeric_cols = df.select_dtypes(include="number").columns
+
+    for col in numeric_cols:
+        zeros = int((df[col] == 0).sum())
+        if zeros > 0:
+            pct = round(zeros / len(df) * 100, 1)
+            records.append({"column": col, "kind": "zero", "count": zeros, "pct": pct})
+
+    for col in numeric_cols:
         Q1 = df[col].quantile(0.25)
         Q3 = df[col].quantile(0.75)
         IQR = Q3 - Q1
@@ -78,31 +93,50 @@ def detect_outliers(df: pd.DataFrame) -> str:
 
         if outlier_count > 0:
             pct = round(outlier_count / len(df) * 100, 1)
-            report.append(f"- {col}: {outlier_count} outliers ({pct}%) — IQR method")
-            logger.warning("Outlier anomaly: %s — %d outliers (%.1f%%)", col, outlier_count, pct)
+            records.append({"column": col, "kind": "outlier", "count": outlier_count, "pct": pct})
 
+    return records
+
+
+def _report_line(rec: dict) -> str:
+    """Format one anomaly record as a report line."""
+    if rec["kind"] == "null":
+        return f"- {rec['column']}: {rec['count']} nulls ({rec['pct']}%)"
+    if rec["kind"] == "zero":
+        return f"- {rec['column']}: {rec['count']} zero values"
+    return f"- {rec['column']}: {rec['count']} outliers ({rec['pct']}%) — IQR method"
+
+
+def _log_anomaly(rec: dict) -> None:
+    """Emit the warning log entry for one anomaly record."""
+    if rec["kind"] == "null":
+        logger.warning("Null anomaly: %s — %d nulls (%.1f%%)", rec["column"], rec["count"], rec["pct"])
+    elif rec["kind"] == "zero":
+        logger.warning("Zero value anomaly: %s — %d zeros", rec["column"], rec["count"])
+    else:
+        logger.warning("Outlier anomaly: %s — %d outliers (%.1f%%)", rec["column"], rec["count"], rec["pct"])
+
+
+def detect_outliers(df: pd.DataFrame) -> str:
+    """Scan numeric columns for outliers using the IQR method.
+
+    For each numeric column, flag values outside [Q1 - 1.5*IQR, Q3 + 1.5*IQR].
+    Returns a formatted report string.
+    """
+    report = []
+    for rec in profile_anomalies(df):
+        if rec["kind"] == "outlier":
+            report.append(_report_line(rec))
+            _log_anomaly(rec)
     return "\n".join(report)
 
 
 def detect_anomalies(df: pd.DataFrame) -> str:
     """Scan a DataFrame for nulls, zero values, and outliers; return a formatted anomaly report."""
     report = []
-
-    nulls = df.isnull().sum()
-    for col, count in nulls[nulls > 0].items():
-        pct = round(count / len(df) * 100, 1)
-        report.append(f"- {col}: {count} nulls ({pct}%)")
-        logger.warning("Null anomaly: %s — %d nulls (%.1f%%)", col, count, pct)
-
-    for col in df.select_dtypes(include="number").columns:
-        zeros = (df[col] == 0).sum()
-        if zeros > 0:
-            report.append(f"- {col}: {zeros} zero values")
-            logger.warning("Zero value anomaly: %s — %d zeros", col, zeros)
-
-    outlier_report = detect_outliers(df)
-    if outlier_report:
-        report.append(outlier_report)
+    for rec in profile_anomalies(df):
+        report.append(_report_line(rec))
+        _log_anomaly(rec)
 
     if not report:
         logger.info("No anomalies detected.")
