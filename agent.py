@@ -130,6 +130,7 @@ class _AgentState:
         self.pending: tuple | None = None  # (column, kind) applied but not yet verified
         self.fixes: list[dict] = []
         self.transcript: list[dict] = []
+        self.usage: dict = {"input_tokens": 0, "output_tokens": 0}
 
 
 def _apply_fix(state: _AgentState, tool_input: dict) -> dict:
@@ -194,6 +195,7 @@ def _build_report(state: _AgentState, status: str, summary: str, turns_used: int
         "rows_original": len(state.sandbox._original),
         "rows_final": len(state.sandbox.df),
         "turns_used": turns_used,
+        "usage": state.usage,
         "transcript": state.transcript,
     }
 
@@ -248,6 +250,11 @@ def run_remediation(df: pd.DataFrame, dataset_name: str, client, max_turns: int 
             messages=messages,
         )
         messages.append({"role": "assistant", "content": response.content})
+
+        usage = getattr(response, "usage", None)  # scripted mocks don't provide one
+        if usage is not None:
+            state.usage["input_tokens"] += getattr(usage, "input_tokens", 0) or 0
+            state.usage["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
 
         entry = {"turn": turn, "assistant": [], "results": []}
         tool_results = []

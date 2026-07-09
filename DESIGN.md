@@ -85,7 +85,7 @@ Deliberate shape: the agent holds the *reasoning*; every tool is deterministic, 
 
 Per anomaly: `resolved` (target gone from report), `regression_free` (no new anomalies), `rows_retained` (≥ 0.8), `attempts`. Per run: fix success rate, false-fix rate (resolved but failed regression/row checks — the dangerous quadrant), give-up rate, mean attempts, token cost.
 
-**Offline eval:** a seeded-anomaly benchmark (`eval/seed_anomalies.py`) injects known defects (nulls, zeros, outliers, mixed) into clean frames, then scores the agent against ground truth. This reuses the LLM-as-judge philosophy from my [llm-eval-harness](https://github.com/valtrof/llm-eval-harness) but needs no judge — ground truth is known by construction. Results table goes in the README.
+**Offline eval:** a seeded-anomaly benchmark (`evals/`) injects known defects (nulls, zeros, outliers, mixed) into clean frames, then scores the agent against ground truth. This reuses the LLM-as-judge philosophy from my [llm-eval-harness](https://github.com/valtrof/llm-eval-harness) but needs no judge — ground truth is known by construction. Results table goes in the README.
 
 ## API surface
 
@@ -106,8 +106,8 @@ Same discipline as v1: the Anthropic client is injected, so the agent loop is te
 1. [x] `DESIGN.md` (this doc) committed — 2026-07-08
 2. [x] `sandbox.py` + `verify` diff logic + tests — the deterministic backbone — 2026-07-08 (`profile_anomalies()` added to `anomaly_detector.py` as the structured detection source; string reports rebuilt on top of it, output unchanged; 48 tests green)
 3. [x] `agent.py` tool-use loop + mock-client tests — 2026-07-08 (60 tests green; live smoke run on seeded synthetic data: 3/3 anomalies fixed in 10 turns, including one fare-outlier fix that failed verification and was retried successfully — transcript in `demo_run.json`)
-4. [ ] `/remediate` endpoint + Docker/CI green
-5. [ ] Seeded-anomaly eval + results table in README
+4. [x] `/remediate` endpoint + Docker/CI green — 2026-07-08 (7 endpoint tests via TestClient with mocked BigQuery/LLM clients; Docker image now ships sandbox.py + agent.py; CI green on push)
+5. [x] Seeded-anomaly eval + results table in README — 2026-07-08 (5 cases / 7 seeded anomalies: 100% verified-fix rate, 0 false fixes, $0.086 total; heavy_nulls case forced two verifier rejections before an acceptable fix — the adaptation loop working as designed)
 
 ## Open questions
 

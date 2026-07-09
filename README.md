@@ -34,8 +34,23 @@ Status:
 - [x] Design doc — [DESIGN.md](DESIGN.md)
 - [x] `sandbox.py` — restricted execution of fix code (AST safety checks, minimal namespace, atomic apply) + deterministic verification verdicts; fully unit-tested including adversarial fixes
 - [x] `agent.py` — bounded tool-use loop (budgets, verify-before-finalize gate, and attempt caps enforced in code, not by the model). Live smoke run: 3/3 seeded anomalies fixed in 10 turns with 100% row retention — including one fix that failed verification and was corrected on retry ([demo_run.json](demo_run.json))
-- [ ] `POST /remediate` endpoint
-- [ ] Seeded-anomaly eval with results table here
+- [x] `POST /remediate` endpoint — runs the agent loop on a BigQuery sample and returns the remediation report with the full transcript; source data is never touched
+- [x] Seeded-anomaly eval — **100% verified-fix rate (7/7), 0 false fixes**, $0.086 total; see table below
+
+### Eval results
+
+`python -m evals.run_eval` seeds known defects into a verified-clean synthetic frame, runs the live agent, and scores it against ground truth by construction — no LLM judge needed. Model: `claude-haiku-4-5`.
+
+| Case | Seeded | Verified fixes | False fixes | Gave up | Rows kept | Attempts | Turns | Cost |
+|---|---|---|---|---|---|---|---|---|
+| nulls_single | 1 | 1 | 0 | 0 | 100% | 1 | 4 | $0.010 |
+| zeros_single | 1 | 1 | 0 | 0 | 100% | 1 | 4 | $0.011 |
+| outliers_single | 1 | 1 | 0 | 0 | 100% | 1 | 4 | $0.011 |
+| mixed_three_kinds | 3 | 3 | 0 | 0 | 96% | 3 | 8 | $0.024 |
+| heavy_nulls | 1 | 1 | 0 | 0 | 100% | 3 | 10 | $0.030 |
+| **Total** | **7** | **7** | **0** | **0** |  |  |  | **$0.086** |
+
+The `heavy_nulls` case (40% of a column null) is adversarial by design: dropping the null rows cannot pass the row-retention gate, so the agent must impute. In the recorded run its first two imputation strategies introduced new statistical anomalies — the verifier rejected both fixes, and the agent reset the sandbox and switched to a fill strategy that preserved the distribution, which passed. That rejection-and-adaptation loop is the system's core claim working under pressure: the model proposes, deterministic checks dispose.
 
 ## Quick start (Docker)
 
